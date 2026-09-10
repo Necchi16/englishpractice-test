@@ -314,7 +314,9 @@
             let enText = "";
             
             // APIのレスポンスの形式が異なる場合でも極力取得できるように判定
-            if (data && data.text) {
+            if (data && data.result) {         // ← ★ここを追加（Cloudflare Worker用）
+              enText = data.result;            // ← ★ここを追加
+            } else if (data && data.text) {
               enText = data.text;
             } else if (Array.isArray(data) && data[0] && Array.isArray(data[0]) && data[0][0]) {
               // 公式のGoogle Translate APIの生レスポンスに近い形式の場合
