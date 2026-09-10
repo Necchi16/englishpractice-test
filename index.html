@@ -291,65 +291,60 @@
       const [isTranslating, setIsTranslating] = useState(false);
       const [isSlow, setIsSlow] = useState(false);
 
-      // ★新しく設定されたCloudflare Workersなどの翻訳API URL
-      const TRANSLATE_API_URL = "https://translate-api.s-sekine.workers.dev/";
-
       const translateToEn = async (jaText, type) => {
-        if (!jaText) return "";
-        // 1. アプリ側でのキャッシュチェック（一番早い）
-        const cacheKey = `trans_${jaText}`;
-        const cached = localStorage.getItem(cacheKey);
-        if (cached) return cached;
+        if (!jaText) return "";
+        // 1. キャッシュチェック（すでに調べた単語は0秒で表示）
+        const cacheKey = `trans_${jaText}`;
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) return cached;
 
-        // GETリクエストでtextパラメータを送信
-        const url = `${TRANSLATE_API_URL}?text=${encodeURIComponent(jaText)}`;
+        let enText = "";
 
-        let retries = 2; // 最大2回まで自動再チャレンジ
-        while(retries >= 0) {
-          try {
-            const res = await fetch(url);
-            if (!res.ok) throw new Error('Network error');
-            const data = await res.json();
-            
-            let enText = "";
-            
-            // APIのレスポンスの形式が異なる場合でも極力取得できるように判定
-            if (data && data.result) {         // ← ★ここを追加（Cloudflare Worker用）
-              enText = data.result;            // ← ★ここを追加
-            } else if (data && data.text) {
-              enText = data.text;
-            } else if (Array.isArray(data) && data[0] && Array.isArray(data[0]) && data[0][0]) {
-              // 公式のGoogle Translate APIの生レスポンスに近い形式の場合
-              enText = data[0][0][0]; 
-            } else if (data && data.translatedText) {
-              enText = data.translatedText;
-            } else {
-              enText = "";
+        try {
+          // ブラウザに翻訳機能（Translation API）が内蔵されているかチェック
+          if (!('translation' in window)) {
+            console.warn("このブラウザは内蔵翻訳に対応していません。");
+            return type === 'adjective' ? 'nice' : 'something';
+          }
+
+          // 日本語(ja)から英語(en)への翻訳が可能かチェック
+          const canTranslate = await window.translation.canTranslate({
+            sourceLanguage: 'ja',
+            targetLanguage: 'en',
+          });
+
+          // 翻訳可能な場合（'no' 以外ならOK）
+          if (canTranslate !== 'no') {
+            // 翻訳機を立ち上げる（※初回のみ裏で辞書データがダウンロードされる場合があります）
+            const translator = await window.translation.createTranslator({
+              sourceLanguage: 'ja',
+              targetLanguage: 'en',
+            });
+
+            // 実際に翻訳する
+            let rawEnText = await translator.translate(jaText);
+
+            // 翻訳結果から記号や「a, an, the」などを綺麗に取り除く
+            enText = rawEnText.replace(/[\.\,\!]/g, '').trim().toLowerCase();
+            if (type === 'adjective' || type === 'object') {
+              enText = enText.replace(/^a /, '').replace(/^an /, '').replace(/^the /, '');
             }
 
-            // 余計な記号などを取り除く
-            enText = enText.replace(/[\.\,\!]/g, '').trim().toLowerCase();
-            if (type === 'adjective' || type === 'object') {
-              enText = enText.replace(/^a /, '').replace(/^an /, '').replace(/^the /, '');
-            }
-
-            // 翻訳結果を記憶する
+            // 成功したら記憶（キャッシュ）して返す
             if (enText) {
-              localStorage.setItem(cacheKey, enText);
-              return enText;
-            } else {
-              throw new Error("Translation text could not be extracted.");
+              localStorage.setItem(cacheKey, enText);
+              return enText;
             }
-          } catch(e) {
-            if (retries === 0) {
-              return type === 'adjective' ? 'nice' : 'something';
-            }
-            retries--;
-            // エラー時は少しランダムな時間待ってから再試行（渋滞を散らす）
-            await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
-          }
-        }
-      };
+          } else {
+            console.warn("日本語から英語への翻訳辞書が利用できません。");
+          }
+        } catch (e) {
+          console.error("内蔵翻訳エラー:", e);
+        }
+
+        // 万が一エラーになった場合は、とりあえずアプリが止まらないようにする
+        return type === 'adjective' ? 'nice' : 'something';
+      };
 
       const handleDecide = async () => {
         const currentAction = ACTIONS[currentActionIndex];
